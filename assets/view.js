@@ -71,43 +71,59 @@ function toggleChallengeUpdate() {
     btn.classList.toggle('d-none');
 }
 
-function calculateExpiry(date) {
-    // Get the difference in minutes
-    let difference = Math.ceil(
-		(new Date(date * 1000) - new Date()) / 1000 / 60
-	);;
-    return difference;
+
+function calculateExpiry(expiresAtTimestamp) {
+    // Get the difference in seconds
+    let now = Date.now(); // Current time in milliseconds
+    let difference = Math.floor((expiresAtTimestamp * 1000 - now) / 1000);
+    return difference > 0 ? difference : 0;
+}
+
+function formatTime(seconds) {
+    let minutes = Math.floor(seconds / 60);
+    let secs = seconds % 60;
+    let minutesStr = minutes < 10 ? '0' + minutes : '' + minutes;
+    let secondsStr = secs < 10 ? '0' + secs : '' + secs;
+    return minutesStr + ':' + secondsStr;
 }
 
 function createChallengeLinkElement(data, parent) {
+    var expires = document.createElement('span');
+    parent.append(expires);
+    parent.append(document.createElement('br'));
 
-	var expires = document.createElement('span');
-	expires.textContent = "Instance expires in " + calculateExpiry(new Date(data.expires)) + " minutes.";
+    function updateExpiry() {
+        let secondsLeft = calculateExpiry(data.expires);
+        if (secondsLeft > 0) {
+            expires.textContent = "Instance expires in " + formatTime(secondsLeft);
+        } else {
+            expires.textContent = "Instance has expired.";
+            clearInterval(expiryInterval);
+        }
+    }
 
-	parent.append(expires); 
-	parent.append(document.createElement('br'));
+    updateExpiry();
+    var expiryInterval = setInterval(updateExpiry, 1000);
 
-	if (data.connect == "tcp") {
-		let codeElement = document.createElement('code');
-		codeElement.textContent = 'nc ' + data.hostname + " " + data.port;
-		parent.append(codeElement);
-	} else if(data.connect == "ssh") {
-		let codeElement = document.createElement('code');
-        // In case you have to get the password from other sources
-        if(data.ssh_password == null) {
+    if (data.connect == "tcp") {
+        let codeElement = document.createElement('code');
+        codeElement.textContent = 'nc ' + data.hostname + " " + data.port;
+        parent.append(codeElement);
+    } else if (data.connect == "ssh") {
+        let codeElement = document.createElement('code');
+        if (data.ssh_password == null) {
             codeElement.textContent = 'ssh -o StrictHostKeyChecking=no ' + data.ssh_username + '@' + data.hostname + " -p" + data.port;
         } else {
             codeElement.textContent = 'sshpass -p' + data.ssh_password + " ssh -o StrictHostKeyChecking=no " + data.ssh_username + '@' + data.hostname + " -p" + data.port;
         }
-		parent.append(codeElement);
-	}
-    else {
-		let link = document.createElement('a');
-		link.href = 'http://' + data.hostname + ":" + data.port;
-		link.textContent = 'http://' + data.hostname + ":" + data.port;
-		link.target = '_blank'
-		parent.append(link);
-	}
+        parent.append(codeElement);
+    } else {
+        let link = document.createElement('a');
+        link.href = 'http://' + data.hostname + ":" + data.port;
+        link.textContent = 'http://' + data.hostname + ":" + data.port;
+        link.target = '_blank';
+        parent.append(link);
+    }
 }
 
 function view_container_info(challenge_id) {
