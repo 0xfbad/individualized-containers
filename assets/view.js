@@ -103,8 +103,8 @@ function createChallengeLinkElement(data, parent) {
     } else if (data.connect === "ssh") {
         const codeElement = document.createElement('code');
         codeElement.textContent = data.ssh_password 
-            ? `sshpass -p${data.ssh_password} ssh -o StrictHostKeyChecking=no ${data.ssh_username}@${data.hostname} -p${data.port}`
-            : `ssh -o StrictHostKeyChecking=no ${data.ssh_username}@${data.hostname} -p${data.port}`;
+            ? `sshpass -p ${data.ssh_password} ssh -o StrictHostKeyChecking=no ${data.ssh_username}@${data.hostname} -p ${data.port}`
+            : `ssh -o StrictHostKeyChecking=no ${data.ssh_username}@${data.hostname} -p ${data.port}`;
         connectionDetails.append(codeElement);
     } else {
         const link = document.createElement('a');
