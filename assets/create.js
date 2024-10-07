@@ -1,44 +1,38 @@
-CTFd.plugin.run((_CTFd) => {
+CTFd.plugin.run(async (_CTFd) => {
     const $ = _CTFd.lib.$;
     const md = _CTFd.lib.markdown();
-});
 
-var containerImage = document.getElementById("container-image");
-var containerImageDefault = document.getElementById("container-image-default");
-var path = "/containers/api/images";
+    const containerImage = document.getElementById("container-image");
+    const containerImageDefault = document.getElementById("container-image-default");
 
-fetch(path, {
-    method: "GET",
-    headers: {
-        "Accept": "application/json",
-        "CSRF-Token": init.csrfNonce
-    }
-})
-.then(response => {
-    if (!response.ok) {
-        // Handle error response
-        return Promise.reject("Error fetching data");
-    }
-    return response.json();
-})
-.then(data => {
-    if (data.error != undefined) {
-        // Error
-        containerImageDefault.innerHTML = data.error;
-    } else {
-        // Success
-        for (var i = 0; i < data.images.length; i++) {
-            var opt = document.createElement("option");
-            opt.value = data.images[i];
-            opt.innerHTML = data.images[i];
-            containerImage.appendChild(opt);
+    try {
+        const response = await fetch("/containers/api/images", {
+            method: "GET",
+            headers: {
+                "Accept": "application/json",
+                "CSRF-Token": init.csrfNonce
+            }
+        });
+
+        if (!response.ok) throw new Error("Error fetching data");
+
+        const data = await response.json();
+
+        if (data.error) {
+            containerImageDefault.textContent = data.error;
+        } else {
+            data.images.forEach(image => {
+                const option = document.createElement("option");
+                option.value = image;
+                option.textContent = image;
+                containerImage.appendChild(option);
+            });
+
+            containerImageDefault.textContent = "Choose an image...";
+            containerImage.removeAttribute("disabled");
         }
-        containerImageDefault.innerHTML = "Choose an image...";
-        containerImage.removeAttribute("disabled");
+    } catch (error) {
+        console.error("Fetch error:", error);
+        containerImageDefault.textContent = "Failed to load images.";
     }
-    console.log(data);
-})
-.catch(error => {
-    // Handle fetch error
-    console.error(error);
 });
