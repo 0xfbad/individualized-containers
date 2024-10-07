@@ -1,69 +1,88 @@
-var containerImage = document.getElementById("container-image");
-var containerImageDefault = document.getElementById("container-image-default");
-var path = "/containers/api/images";
-
-fetch(path, {
-    method: "GET",
-    headers: {
-        "Accept": "application/json",
-        "CSRF-Token": init.csrfNonce
-    }
-})
-    .then(response => response.json())
-    .then(data => {
-        if (data.error !== undefined) {
-            // Error
-            containerImageDefault.innerHTML = data.error;
-        } else {
-            // Success
-            for (var i = 0; i < data.images.length; i++) {
-                var opt = document.createElement("option");
-                opt.value = data.images[i];
-                opt.innerHTML = data.images[i];
-                containerImage.appendChild(opt);
+async function fetchData(url, method = "GET", headers = {}, body = null) {
+    try {
+        const options = {
+            method,
+            headers: {
+                "Accept": "application/json",
+                "CSRF-Token": init.csrfNonce,
+                ...headers
             }
-            containerImageDefault.innerHTML = "Choose an image...";
-            containerImage.removeAttribute("disabled");
-            containerImage.value = container_image_selected;
+        };
+        
+        if (body) {
+            options.body = JSON.stringify(body);
         }
-    })
-    .catch(error => {
+
+        const response = await fetch(url, options);
+        const data = await response.json();
+
+        if (data.error) {
+            console.error("Error:", data.error);
+            return null;
+        }
+
+        return data;
+    } catch (error) {
         console.error("Fetch error:", error);
+        return null;
+    }
+}
+
+async function loadContainerImages() {
+    const containerImage = document.getElementById("container-image");
+    const containerImageDefault = document.getElementById("container-image-default");
+
+    const data = await fetchData("/containers/api/images");
+
+    if (!data) {
+        containerImageDefault.innerHTML = "Failed to load images.";
+        return;
+    }
+
+    data.images.forEach(image => {
+        const opt = document.createElement("option");
+        opt.value = image;
+        opt.innerHTML = image;
+        containerImage.appendChild(opt);
     });
 
-var currentURL = window.location.href;
-var match = currentURL.match(/\/challenges\/(\d+)/);
-
-if (match && match[1]) {
-    var challenge_id = parseInt(match[1]);
-
-    var connectType = document.getElementById("connect-type");
-    var connectTypeDefault = document.getElementById("connect-type-default");
-
-    var connectTypeEndpoint = "/containers/api/get_connect_type/" + challenge_id;
-
-    fetch(connectTypeEndpoint, {
-        method: "GET",
-        headers: {
-            "Accept": "application/json",
-            "CSRF-Token": init.csrfNonce
-        }
-    })
-        .then(response => response.json())
-        .then(connectTypeData => {
-            if (connectTypeData.error !== undefined) {
-                console.error("Error:", connectTypeData.error);
-            } else {
-                var connectTypeValue = connectTypeData.connect;
-
-                connectTypeDefault.innerHTML = "Choose...";
-                connectType.removeAttribute("disabled");
-                connectType.value = connectTypeValue;
-            }
-        })
-        .catch(error => {
-            console.error("Fetch error:", error);
-        });
-} else {
-    console.error("Challenge ID not found in the URL.");
+    containerImageDefault.innerHTML = "Choose an image...";
+    containerImage.removeAttribute("disabled");
+    containerImage.value = container_image_selected;
 }
+
+async function loadConnectType(challengeId) {
+    const connectType = document.getElementById("connect-type");
+    const connectTypeDefault = document.getElementById("connect-type-default");
+
+    const data = await fetchData(`/containers/api/get_connect_type/${challengeId}`);
+
+    if (!data) {
+        connectTypeDefault.innerHTML = "Failed to load connect type.";
+        return;
+    }
+
+    connectTypeDefault.innerHTML = "Choose...";
+    connectType.removeAttribute("disabled");
+    connectType.value = data.connect;
+}
+
+function getChallengeIdFromURL() {
+    const currentURL = window.location.href;
+    const match = currentURL.match(/\/challenges\/(\d+)/);
+
+    return match && match[1] ? parseInt(match[1]) : null;
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+    await loadContainerImages();
+
+    const challengeId = getChallengeIdFromURL();
+
+    if (challengeId) {
+        await loadConnectType(challengeId);
+    } else {
+        console.error("Challenge ID not found in the URL.");
+    }
+});
+
