@@ -209,7 +209,15 @@ def load(app: Flask):
         except ContainerException:
             return {"error": "Database error occurred, please try again."}
 
-        return {"success": "Container renewed", "expires": running_container.expires, "hostname": container_manager.settings.get("docker_hostname", ""), "port": running_container.port, "connect": challenge.ctype}
+        return {
+            "success": "Container renewed",
+            "expires": running_container.expires, 
+            "hostname": container_manager.settings.get("docker_hostname", ""), 
+            "ssh_username": challenge.ssh_username,
+            "ssh_password": challenge.ssh_password,
+            "port": running_container.port, 
+            "connect": challenge.ctype
+        }
 
     def create_container(chal_id, xid, uid, is_team):
         # Get the requested challenge
@@ -307,7 +315,9 @@ def load(app: Flask):
         return json.dumps({
             "status": "created",
             "hostname": container_manager.settings.get("docker_hostname", ""),
-            "port": port,
+            "port": port,            
+            "ssh_username": challenge.ssh_username,
+            "ssh_password": challenge.ssh_password,
             "connect": challenge.ctype,
             "expires": expires
         })
@@ -340,6 +350,8 @@ def load(app: Flask):
                         "status": "already_running",
                         "hostname": container_manager.settings.get("docker_hostname", ""),
                         "port": running_container.port,
+                        "ssh_username": challenge.ssh_username,
+                        "ssh_password": challenge.ssh_password,
                         "connect": challenge.ctype,
                         "expires": running_container.expires
                     })
