@@ -135,8 +135,8 @@ function view_container_info(challengeId) {
     })
     .then((response) => response.json())
     .then((data) => {
-        if (data.status === "Instance not started") {
-            alert.textContent = data.status;
+        if (data.status === "instance not started") {
+            alert.textContent = "Instance not started" ;
             toggleChallengeCreate();
         } else if (data.status === "already_running") {
             createChallengeLinkElement(data, alert);

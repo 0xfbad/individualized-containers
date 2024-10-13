@@ -3,14 +3,13 @@ import json
 import datetime
 from flask import current_app
 from CTFd.models import db
-from CTFd.utils import get_config
 
 from . import containers_bp
 from ..models import ContainerInfoModel, ContainerChallengeModel
 from ..container_manager import ContainerException
 from ..utils import settings
 
-
+# function to kill a container by its id
 def kill_container(container_id):
     container_manager = current_app.container_manager
     container = ContainerInfoModel.query.filter_by(container_id=container_id).first()
@@ -18,49 +17,43 @@ def kill_container(container_id):
     try:
         container_manager.kill_container(container_id)
     except ContainerException:
-        return {"error": "Docker is not initialized. Please check your settings."}
+        return {"error": "docker is not initialized. please check your settings."}
 
     if container:
         db.session.delete(container)
         db.session.commit()
-        return {"success": "Container killed"}
+        return {"success": "container killed"}
     else:
-        return {"error": "Container not found"}
+        return {"error": "container not found"}
 
-
+# function to renew an existing container's expiration time
 def renew_container(chal_id, xid, is_team):
     container_manager = current_app.container_manager
-
-    # Get the requested challenge
     challenge = ContainerChallengeModel.query.filter_by(id=chal_id).first()
 
-    # Make sure the challenge exists
+    # check if the challenge exists
     if challenge is None:
-        return {"error": "Challenge not found"}, 400
+        return {"error": "challenge not found"}, 400
 
-    # Fetch the running container
-    if is_team:
-        running_container = ContainerInfoModel.query.filter_by(
-            challenge_id=challenge.id, team_id=xid
-        ).first()
-    else:
-        running_container = ContainerInfoModel.query.filter_by(
-            challenge_id=challenge.id, user_id=xid
-        ).first()
+    # determine whether to filter by team_id or user_id
+    filter_args = {'challenge_id': challenge.id}
+    filter_args['team_id' if is_team else 'user_id'] = xid
+    running_container = ContainerInfoModel.query.filter_by(**filter_args).first()
 
+    # check if there is a running container
     if running_container is None:
-        return {"error": "Container not found, try resetting the container."}
+        return {"error": "container not found, try resetting the container."}
 
     try:
-        running_container.expires = int(
-            time.time() + container_manager.expiration_seconds
-        )
+        # update the container's expiration time
+        running_container.expires = int(time.time() + container_manager.expiration_seconds)
         db.session.commit()
-    except ContainerException:
-        return {"error": "Database error occurred, please try again."}
+    except Exception:
+        return {"error": "database error occurred, please try again."}
 
+    # return the updated container details
     return {
-        "success": "Container renewed",
+        "success": "container renewed",
         "expires": running_container.expires,
         "hostname": container_manager.settings.get("docker_hostname", ""),
         "ssh_username": challenge.ssh_username,
@@ -69,63 +62,53 @@ def renew_container(chal_id, xid, is_team):
         "connect": challenge.ctype,
     }
 
-
+# function to create a new container for a challenge
 def create_container(chal_id, xid, uid, is_team):
     container_manager = current_app.container_manager
-
-    # Get the requested challenge
     challenge = ContainerChallengeModel.query.filter_by(id=chal_id).first()
 
-    # Make sure the challenge exists
+    # check if the challenge exists
     if challenge is None:
-        return {"error": "Challenge not found"}, 400
+        return {"error": "challenge not found"}, 400
 
-    # Check if user already has MAX_CONTAINERS_ALLOWED number of running containers.
-    MAX_CONTAINERS_ALLOWED = int(settings["vars"]["MAX_CONTAINERS_ALLOWED"])
+    # get the maximum number of allowed containers
+    max_containers_allowed = int(settings["vars"]["MAX_CONTAINERS_ALLOWED"])
     if not is_team:
         uid = xid
-    t_containers = ContainerInfoModel.query.filter_by(user_id=uid)
+    user_containers = ContainerInfoModel.query.filter_by(user_id=uid)
 
-    if t_containers.count() >= MAX_CONTAINERS_ALLOWED:
+    # check if the user has reached the maximum allowed containers
+    if user_containers.count() >= max_containers_allowed:
         return {
-            "error": f"You can only spawn {MAX_CONTAINERS_ALLOWED} containers at a time. Please stop other containers to continue"
+            "error": f"you can only spawn {max_containers_allowed} containers at a time. please stop other containers to continue"
         }, 500
 
-    # Check for any existing containers for the user/team and challenge
-    if is_team:
-        running_container = ContainerInfoModel.query.filter_by(
-            challenge_id=challenge.id, team_id=xid
-        ).first()
-    else:
-        running_container = ContainerInfoModel.query.filter_by(
-            challenge_id=challenge.id, user_id=xid
-        ).first()
+    # check for any existing containers for the user/team and challenge
+    filter_args = {'challenge_id': challenge.id}
+    filter_args['team_id' if is_team else 'user_id'] = xid
+    running_container = ContainerInfoModel.query.filter_by(**filter_args).first()
 
-    # If a container is already running, return it
     if running_container:
         try:
             if container_manager.is_container_running(running_container.container_id):
-                return json.dumps(
-                    {
-                        "status": "already_running",
-                        "hostname": container_manager.settings.get(
-                            "docker_hostname", ""
-                        ),
-                        "port": running_container.port,
-                        "ssh_username": challenge.ssh_username,
-                        "ssh_password": challenge.ssh_password,
-                        "connect": challenge.ctype,
-                        "expires": running_container.expires,
-                    }
-                )
+                # return existing container details
+                return json.dumps({
+                    "status": "already_running",
+                    "hostname": container_manager.settings.get("docker_hostname", ""),
+                    "port": running_container.port,
+                    "ssh_username": challenge.ssh_username,
+                    "ssh_password": challenge.ssh_password,
+                    "connect": challenge.ctype,
+                    "expires": running_container.expires,
+                })
             else:
-                # Container is not running, remove it from the database
+                # remove the container from the database if it's not running
                 db.session.delete(running_container)
                 db.session.commit()
         except ContainerException as err:
             return {"error": str(err)}, 500
 
-    # Run a new Docker container
+    # try to create a new container
     try:
         created_container = container_manager.create_container(
             chal_id,
@@ -139,16 +122,15 @@ def create_container(chal_id, xid, uid, is_team):
     except ContainerException as err:
         return {"error": str(err)}
 
-    # Fetch the random port Docker assigned
+    # get the port assigned to the new container
     port = container_manager.get_container_port(created_container.id)
 
-    # Port may be blank if the container failed to start
     if port is None:
-        return json.dumps({"status": "error", "error": "Could not get port"})
+        return json.dumps({"status": "error", "error": "could not get port"})
 
     expires = int(time.time() + container_manager.expiration_seconds)
 
-    # Insert the new container into the database
+    # add the new container to the database
     new_container = ContainerInfoModel(
         container_id=created_container.id,
         challenge_id=challenge.id,
@@ -161,80 +143,69 @@ def create_container(chal_id, xid, uid, is_team):
     db.session.add(new_container)
     db.session.commit()
 
-    return json.dumps(
-        {
-            "status": "created",
-            "hostname": container_manager.settings.get("docker_hostname", ""),
-            "port": port,
-            "ssh_username": challenge.ssh_username,
-            "ssh_password": challenge.ssh_password,
-            "connect": challenge.ctype,
-            "expires": expires,
-        }
-    )
+    # return new container details
+    return json.dumps({
+        "status": "created",
+        "hostname": container_manager.settings.get("docker_hostname", ""),
+        "port": port,
+        "ssh_username": challenge.ssh_username,
+        "ssh_password": challenge.ssh_password,
+        "connect": challenge.ctype,
+        "expires": expires,
+    })
 
-
+# function to view information about a container
 def view_container_info(chal_id, xid, is_team):
     container_manager = current_app.container_manager
-
-    # Get the requested challenge
     challenge = ContainerChallengeModel.query.filter_by(id=chal_id).first()
 
-    # Make sure the challenge exists
+    # check if the challenge exists
     if challenge is None:
-        return {"error": "Challenge not found"}, 400
+        return {"error": "challenge not found"}, 400
 
-    # Check for any existing containers for the user/team and challenge
-    if is_team:
-        running_container = ContainerInfoModel.query.filter_by(
-            challenge_id=challenge.id, team_id=xid
-        ).first()
-    else:
-        running_container = ContainerInfoModel.query.filter_by(
-            challenge_id=challenge.id, user_id=xid
-        ).first()
+    # check for any existing containers for the user/team and challenge
+    filter_args = {'challenge_id': challenge.id}
+    filter_args['team_id' if is_team else 'user_id'] = xid
+    running_container = ContainerInfoModel.query.filter_by(**filter_args).first()
 
-    # If a container is already running, return it
     if running_container:
         try:
             if container_manager.is_container_running(running_container.container_id):
-                return json.dumps(
-                    {
-                        "status": "already_running",
-                        "hostname": container_manager.settings.get(
-                            "docker_hostname", ""
-                        ),
-                        "port": running_container.port,
-                        "ssh_username": challenge.ssh_username,
-                        "ssh_password": challenge.ssh_password,
-                        "connect": challenge.ctype,
-                        "expires": running_container.expires,
-                    }
-                )
+                # return existing container details
+                return json.dumps({
+                    "status": "already_running",
+                    "hostname": container_manager.settings.get("docker_hostname", ""),
+                    "port": running_container.port,
+                    "ssh_username": challenge.ssh_username,
+                    "ssh_password": challenge.ssh_password,
+                    "connect": challenge.ctype,
+                    "expires": running_container.expires,
+                })
             else:
-                # Container is not running, remove it from the database
+                # remove the container from the database if it's not running
                 db.session.delete(running_container)
                 db.session.commit()
         except ContainerException as err:
             return {"error": str(err)}, 500
     else:
-        return {"status": "Instance not started"}
+        return {"status": "instance not started"}
 
-
+# function to get the connection type of a challenge
 def connect_type(chal_id):
-    # Get the requested challenge
     challenge = ContainerChallengeModel.query.filter_by(id=chal_id).first()
 
-    # Make sure the challenge exists
+    # check if the challenge exists
     if challenge is None:
-        return {"error": "Challenge not found"}, 400
+        return {"error": "challenge not found"}, 400
 
-    return json.dumps({"status": "Ok", "connect": challenge.ctype})
+    return json.dumps({"status": "ok", "connect": challenge.ctype})
 
+# filter to format unix timestamp into a readable time string
 @containers_bp.app_template_filter("format_time")
 def format_time_filter(unix_seconds):
     dt = datetime.datetime.fromtimestamp(
         unix_seconds,
         tz=datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo,
     )
+
     return dt.strftime("%H:%M:%S %d/%m/%Y")

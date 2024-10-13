@@ -1,195 +1,189 @@
-import json
-
-from flask import request, render_template, flash, redirect, url_for, current_app
+from flask import (
+	request, render_template, flash, redirect, url_for, current_app, jsonify
+)
 from CTFd.utils.decorators import admins_only
 from CTFd.models import db
 
 from . import containers_bp
-from ..utils import settings_to_dict, is_team_mode
 from .helpers import kill_container
+from ..utils import settings_to_dict, is_team_mode
 from ..models import ContainerInfoModel, ContainerSettingsModel
 from ..container_manager import ContainerException
 
-
+# route to display the containers dashboard
 @containers_bp.route("/dashboard", methods=["GET"])
 @admins_only
 def route_containers_dashboard():
-    container_manager = current_app.container_manager
-    running_containers = ContainerInfoModel.query.order_by(
-        ContainerInfoModel.timestamp.desc()
-    ).all()
+	container_manager = current_app.container_manager
+	running_containers = ContainerInfoModel.query.order_by(
+		ContainerInfoModel.timestamp.desc()
+	).all()
 
-    connected = False
-    try:
-        connected = container_manager.is_connected()
-    except ContainerException:
-        pass
+	try:
+		connected = container_manager.is_connected()
+	except ContainerException:
+		connected = False
 
-    for i, container in enumerate(running_containers):
-        try:
-            running_containers[i].is_running = container_manager.is_container_running(
-                container.container_id
-            )
-        except ContainerException:
-            running_containers[i].is_running = False
+	# update each container's running status
+	for container in running_containers:
+		try:
+			container.is_running = container_manager.is_container_running(
+				container.container_id
+			)
+		except ContainerException:
+			container.is_running = False
 
-    return render_template(
-        "container_dashboard.html",
-        containers=running_containers,
-        connected=connected,
-    )
+	return render_template(
+		"container_dashboard.html",
+		containers=running_containers,
+		connected=connected,
+	)
 
-
+# api route to get running containers data
 @containers_bp.route("/api/running_containers", methods=["GET"])
 @admins_only
 def route_get_running_containers():
-    container_manager = current_app.container_manager
-    running_containers = ContainerInfoModel.query.order_by(
-        ContainerInfoModel.timestamp.desc()
-    ).all()
+	container_manager = current_app.container_manager
+	running_containers = ContainerInfoModel.query.order_by(
+		ContainerInfoModel.timestamp.desc()
+	).all()
 
-    connected = False
-    try:
-        connected = container_manager.is_connected()
-    except ContainerException:
-        pass
+	try:
+		connected = container_manager.is_connected()
+	except ContainerException:
+		connected = False
 
-    # Create lists to store unique teams and challenges
-    unique_teams = set()
-    unique_challenges = set()
+	unique_teams = set()
+	unique_challenges = set()
+	team_mode = is_team_mode()
 
-    for i, container in enumerate(running_containers):
-        try:
-            running_containers[i].is_running = container_manager.is_container_running(
-                container.container_id
-            )
-        except ContainerException:
-            running_containers[i].is_running = False
+	# collect unique teams and challenges
+	for container in running_containers:
+		try:
+			container.is_running = container_manager.is_container_running(
+				container.container_id
+			)
+		except ContainerException:
+			container.is_running = False
 
-        # Add team and challenge to the unique sets
-        if is_team_mode():
-            unique_teams.add(f"{container.team.name} [{container.team_id}]")
-        else:
-            unique_teams.add(f"{container.user.name} [{container.user_id}]")
-        unique_challenges.add(
-            f"{container.challenge.name} [{container.challenge_id}]"
-        )
+		if team_mode:
+			unique_teams.add(f"{container.team.name} [{container.team_id}]")
+		else:
+			unique_teams.add(f"{container.user.name} [{container.user_id}]")
+		unique_challenges.add(f"{container.challenge.name} [{container.challenge_id}]")
 
-    # Convert unique sets to lists
-    unique_teams_list = list(unique_teams)
-    unique_challenges_list = list(unique_challenges)
+	running_containers_data = []
+	for container in running_containers:
+		container_data = {
+			"container_id": container.container_id,
+			"image": container.challenge.image,
+			"challenge": f"{container.challenge.name} [{container.challenge_id}]",
+			"user": f"{container.user.name} [{container.user_id}]",
+			"port": container.port,
+			"created": container.timestamp,
+			"expires": container.expires,
+			"is_running": container.is_running,
+		}
+		if team_mode:
+			container_data["team"] = f"{container.team.name} [{container.team_id}]"
+		running_containers_data.append(container_data)
 
-    # Create a list of dictionaries containing running_containers data
-    running_containers_data = []
-    for container in running_containers:
-        container_data = {
-            "container_id": container.container_id,
-            "image": container.challenge.image,
-            "challenge": f"{container.challenge.name} [{container.challenge_id}]",
-            "user": f"{container.user.name} [{container.user_id}]",
-            "port": container.port,
-            "created": container.timestamp,
-            "expires": container.expires,
-            "is_running": container.is_running,
-        }
-        if is_team_mode():
-            container_data["team"] = f"{container.team.name} [{container.team_id}]"
-        running_containers_data.append(container_data)
+	response_data = {
+		"containers": running_containers_data,
+		"connected": connected,
+		"teams": list(unique_teams),
+		"challenges": list(unique_challenges),
+	}
 
-    # Create a JSON response containing running_containers_data, unique teams, and unique challenges
-    response_data = {
-        "containers": running_containers_data,
-        "connected": connected,
-        "teams": unique_teams_list,
-        "challenges": unique_challenges_list,
-    }
+	return jsonify(response_data)
 
-    # Return the JSON response
-    return json.dumps(response_data)
-
-
+# api route to kill a specific container
 @containers_bp.route("/api/kill", methods=["POST"])
 @admins_only
 def route_kill_container():
-    if request.json is None:
-        return {"error": "Invalid request"}, 400
+	if not request.is_json:
+		return jsonify(error="invalid request"), 400
 
-    container_id = request.json.get("container_id")
-    if container_id is None:
-        return {"error": "No container_id specified"}, 400
+	container_id = request.json.get("container_id")
+	if not container_id:
+		return jsonify(error="no container_id specified"), 400
 
-    return kill_container(container_id)
+	result = kill_container(container_id)
+	status_code = 200 if 'success' in result else 400
+	return jsonify(result), status_code
 
-
+# api route to purge all containers
 @containers_bp.route("/api/purge", methods=["POST"])
 @admins_only
 def route_purge_containers():
-    containers = ContainerInfoModel.query.all()
-    for container in containers:
-        try:
-            kill_container(container.container_id)
-        except ContainerException:
-            pass
-    return {"success": "Purged all containers"}, 200
+	containers = ContainerInfoModel.query.all()
+	for container in containers:
+		try:
+			kill_container(container.container_id)
+		except ContainerException:
+			pass
+	return jsonify(success="purged all containers"), 200
 
-
+# api route to get available docker images
 @containers_bp.route("/api/images", methods=["GET"])
 @admins_only
 def route_get_images():
-    container_manager = current_app.container_manager
-    try:
-        images = container_manager.get_images()
-    except ContainerException as err:
-        return {"error": str(err)}
+	container_manager = current_app.container_manager
+	try:
+		images = container_manager.get_images()
+	except ContainerException as err:
+		return jsonify(error=str(err)), 500
 
-    return {"images": images}
+	return jsonify(images=images)
 
-
+# api route to update container settings
 @containers_bp.route("/api/settings/update", methods=["POST"])
 @admins_only
 def route_update_settings():
-    container_manager = current_app.container_manager
+	container_manager = current_app.container_manager
 
-    required_fields = [
-        "docker_base_url",
-        "docker_hostname",
-        "container_expiration",
-        "container_maxmemory",
-        "container_maxcpu",
-    ]
+	required_fields = [
+		"docker_base_url",
+		"docker_hostname",
+		"container_expiration",
+		"container_maxmemory",
+		"container_maxcpu",
+	]
 
-    for field in required_fields:
-        if request.form.get(field) is None:
-            return {"error": f"Missing required field: {field}"}, 400
+	for field in required_fields:
+		if not request.form.get(field):
+			flash(f"missing required field: {field}", "error")
+			return redirect(url_for(".route_containers_settings"))
 
-    # Update or create settings in the database
-    for field in required_fields:
-        setting = ContainerSettingsModel.query.filter_by(key=field).first()
-        if setting is None:
-            setting = ContainerSettingsModel(key=field, value=request.form.get(field))
-            db.session.add(setting)
-        else:
-            setting.value = request.form.get(field)
+	# update or create settings in the database
+	for field in required_fields:
+		setting = ContainerSettingsModel.query.filter_by(key=field).first()
+		if not setting:
+			setting = ContainerSettingsModel(key=field, value=request.form.get(field))
+			db.session.add(setting)
+		else:
+			setting.value = request.form.get(field)
 
-    db.session.commit()
+	db.session.commit()
 
-    # Update settings in the container manager
-    container_manager.settings = settings_to_dict(ContainerSettingsModel.query.all())
+	# re-initialize container manager with new settings
+	container_manager.settings = settings_to_dict(ContainerSettingsModel.query.all())
 
-    if container_manager.settings.get("docker_base_url") is not None:
-        try:
-            container_manager.initialize_connection(container_manager.settings)
-        except ContainerException as err:
-            flash(str(err), "error")
-            return redirect(url_for(".route_containers_settings"))
+	if container_manager.settings.get("docker_base_url"):
+		try:
+			container_manager.initialize_connection()
+		except ContainerException as err:
+			flash(str(err), "error")
+			return redirect(url_for(".route_containers_settings"))
 
-    return redirect(url_for(".route_containers_dashboard"))
+	return redirect(url_for(".route_containers_dashboard"))
 
-
+# route to display the container settings page
 @containers_bp.route("/settings", methods=["GET"])
 @admins_only
 def route_containers_settings():
-    container_manager = current_app.container_manager
-    return render_template(
-        "container_settings.html", settings=container_manager.settings
-    )
+	container_manager = current_app.container_manager
+    
+	return render_template(
+		"container_settings.html", settings=container_manager.settings
+	)

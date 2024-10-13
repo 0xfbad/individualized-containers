@@ -13,12 +13,9 @@ def load(app: Flask):
     CHALLENGE_CLASSES["container"] = ContainerChallenge
     register_plugin_assets_directory(app, base_path="/plugins/containers/assets/")
 
-    # Load container settings from the database
     container_settings = settings_to_dict(ContainerSettingsModel.query.all())
     container_manager = ContainerManager(container_settings, app)
 
-    # Store the container_manager in the app context
     app.container_manager = container_manager
 
-    # Register the blueprint
     app.register_blueprint(containers_bp)

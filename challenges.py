@@ -8,7 +8,8 @@ from CTFd.utils.modes import get_model
 from .models import ContainerChallengeModel
 from .utils import get_settings_path
 
-settings = json.load(open(get_settings_path()))
+with open(get_settings_path(), 'r') as f:
+    settings = json.load(f)
 
 class ContainerChallenge(BaseChallenge):
     id = settings["plugin-info"]["id"]
@@ -51,8 +52,10 @@ class ContainerChallenge(BaseChallenge):
 
     @classmethod
     def calculate_value(cls, challenge):
+        # get the current user or team model
         Model = get_model()
 
+        # count the number of valid solves for the challenge
         solve_count = (
             Solves.query.join(Model, Solves.account_id == Model.id)
             .filter(
@@ -63,14 +66,13 @@ class ContainerChallenge(BaseChallenge):
             .count()
         )
 
-        # Adjust solve_count for calculation
-        if solve_count != 0:
-            solve_count -= 1
+        # adjust solve count for calculation
+        adjusted_solve_count = max(solve_count - 1, 0)
 
-        # Calculate the new value
+        # calculate the new challenge value based on decay formula
         value = (
             ((challenge.minimum - challenge.initial) / (challenge.decay ** 2))
-            * (solve_count ** 2)
+            * (adjusted_solve_count ** 2)
         ) + challenge.initial
 
         value = math.ceil(value)
@@ -78,24 +80,32 @@ class ContainerChallenge(BaseChallenge):
         if value < challenge.minimum:
             value = challenge.minimum
 
+        # update the challenge value in the database
         challenge.value = value
         db.session.commit()
+
         return challenge
 
     @classmethod
     def update(cls, challenge, request):
-        data = request.form or request.get_json()
+        data = request.form or request.get_json() or {}
 
+        # update challenge attributes with provided data
         for attr, value in data.items():
-            # We need to set these to floats so that the next operations don't operate on strings
+            # convert numeric fields to float if necessary
             if attr in ("initial", "minimum", "decay"):
-                value = float(value)
+                try:
+                    value = float(value)
+                except (ValueError, TypeError):
+                    continue  # skip invalid numeric values
             setattr(challenge, attr, value)
 
-        return ContainerChallenge.calculate_value(challenge)
+        # recalculate the challenge value after update
+        return cls.calculate_value(challenge)
 
     @classmethod
     def solve(cls, user, team, challenge, request):
+        # call the parent solve method to register the solve
         super().solve(user, team, challenge, request)
-        ContainerChallenge.calculate_value(challenge)
-
+        # recalculate the challenge value after a solve
+        cls.calculate_value(challenge)
