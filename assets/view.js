@@ -73,7 +73,14 @@ function formatTime(seconds) {
     return hoursStr + `${minutesStr}:${secondsStr}`;
 }
 
+
 function createChallengeLinkElement(data, parent) {
+    // clear any existing interval associated with the parent
+    if (parent.expiryInterval) {
+        clearInterval(parent.expiryInterval);
+    }
+    parent.innerHTML = '';
+
     const expires = document.createElement('span');
     parent.append(expires, document.createElement('br'));
 
@@ -88,7 +95,8 @@ function createChallengeLinkElement(data, parent) {
             : "Instance has expired";
 
         if (secondsLeft <= 0) {
-            clearInterval(expiryInterval);
+            clearInterval(parent.expiryInterval);
+            delete parent.expiryInterval;
 
             toggleChallengeCreate();
             toggleChallengeUpdate();
@@ -98,7 +106,7 @@ function createChallengeLinkElement(data, parent) {
     }
 
     updateExpiry();
-    const expiryInterval = setInterval(updateExpiry, 1000);
+    parent.expiryInterval = setInterval(updateExpiry, 1000);
 
     if (data.connect === "tcp") {
         const codeElement = document.createElement('code');
@@ -118,7 +126,6 @@ function createChallengeLinkElement(data, parent) {
         connectionDetails.append(link);
     }
 }
-
 
 function view_container_info(challengeId) {
     resetAlert();
