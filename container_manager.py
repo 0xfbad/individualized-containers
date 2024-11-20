@@ -191,12 +191,12 @@ class ContainerManager:
                 raise ContainerException("volumes json string is invalid")
 
         # find an available external port
-        external_port = port
-        max_tries = 100
-        for _ in range(max_tries):
+        selectable_port_range = list(range(1024, 65536))
+        random.shuffle(selectable_port_range)
+    
+        for external_port in selectable_port_range:
             if self._is_port_available(external_port):
                 break
-            external_port = random.randint(port, 65535)
         else:
             raise ContainerException("no available port found")
 
